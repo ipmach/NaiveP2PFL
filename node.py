@@ -1,41 +1,34 @@
 
-from dataclasses import dataclass
 import typing as t
 
+from config import Commands, Config, HttpStatus, Status
 
-@dataclass
-class Status:
-    active: str = "active"
-    unactive: str = "unactive"
+
+status_changes = {
+    Commands.start: Status.active,
+    Commands.stop: Status.unactive,
+    Commands.train: Status.start_training,
+}
+
+
+def _status_logic(config: Config, new_status: Commands) -> t.Tuple[str, HttpStatus]:
+    new_status = status_changes.get(new_status, None)
     
-    start_training: str = "start_training"
-    doing_training: str = "doing_training"
-
-    current_version: int = 1
-
-
-@dataclass
-class HttpStatus:
-    ok: str = "200 OK"
-    not_found: str = "404 Not Found"
-    internal_error: str = "500 Internal Server Error"
-    forbidden: str = "403 Forbidden"
-
-
-@dataclass
-class Commands:
-    start: str = "start"
-    stop: str = "stop"
-    train: str = "train"
-
-
-@dataclass
-class Config:
-    node_id: str
-    node_type: str
-
-    current_version: int = 1
-    current_status: str = Status.active
+    if config.current_status == new_status:
+        return f"Already in status: {new_status}", HttpStatus.ok
+    elif config.current_status == Status.active:
+        config.current_status = new_status
+        return "Done", HttpStatus.ok
+    elif config.current_status == Status.doing_training:
+        return "Cannot change status while training", HttpStatus.forbidden
+    elif config.current_status == Status.unactive:
+        if new_status == Status.active:
+            config.current_status = new_status
+            return "Done", HttpStatus.ok
+        else:
+            return "Cannot change status from unactive", HttpStatus.forbidden
+    else:
+        return "Unknow change", HttpStatus.forbidden
 
 
 class Backend:
@@ -51,13 +44,4 @@ class Backend:
     def command(self, cmd: str, pwd: str) -> t.Tuple[str, HttpStatus]:
         if pwd != self.pwd:
             return f"Invalid password: {pwd}", HttpStatus.forbidden
-
-        if cmd == Commands.start:
-            self.config.current_status = Status.active
-        elif cmd == Commands.stop:
-            self.config.current_status = Status.unactive
-        elif cmd == Commands.train:
-            self.config.current_status = Status.start_training
-        else:
-            raise ValueError(f"Unknown command: {cmd}")
-        return "Done", HttpStatus.ok
+        return _status_logic(self.config, new_status=cmd)
